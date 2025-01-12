@@ -20,15 +20,28 @@ auth-service/
 ├── internal/
 │   ├── handler/
 │   │   └── auth.go
+│   │   └── handler_test.go
+│   │   └── profile.go
+│   │   └── server.go
+│   │   └── subscription.go
 │   ├── middleware/
 │   │   └── auth.go
 │   ├── model/
+│   │   └── profile.go
+│   │   └── subscription.go
+│   │   └── swipe.go
 │   │   └── user.go
 │   └── repository/
-│       └── user.go
+│       └── implementation.go
+│       └── interfaces.go
+│       └── interfaces.mock.gen.go
+│       └── profile.go
+│       └── repository.go
 ├── database.sql
-├── .env
+├── docker-compose.yml
+├── Dockerfile
 ├── go.mod
+├── go.sum
 └── README.md
 ```
 

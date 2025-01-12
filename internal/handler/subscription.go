@@ -2,27 +2,15 @@ package handler
 
 import (
 	"coding-test-11-01-2025-dating-app/internal/model"
-	"coding-test-11-01-2025-dating-app/internal/repository"
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-type SubscriptionHandler struct {
-	subscriptionRepo *repository.SubscriptionRepository
-	profileRepo      *repository.ProfileRepository
-}
-
-func NewSubscriptionHandler(sr *repository.SubscriptionRepository, pr *repository.ProfileRepository) *SubscriptionHandler {
-	return &SubscriptionHandler{
-		subscriptionRepo: sr,
-		profileRepo:      pr,
-	}
-}
-
 // Purchase premium subscription
-func (h *SubscriptionHandler) PurchasePremium(c *gin.Context) {
+func (h *Server) PurchasePremium(c *gin.Context) {
 	userID := c.GetUint("userID")
 
 	// In a real application, you would handle payment processing here
@@ -35,7 +23,7 @@ func (h *SubscriptionHandler) PurchasePremium(c *gin.Context) {
 		EndDate:   time.Now().AddDate(0, 1, 0), // 1 month subscription
 	}
 
-	if err := h.subscriptionRepo.CreateSubscription(subscription); err != nil {
+	if err := h.Repository.CreateSubscription(context.Background(), subscription); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create subscription"})
 		return
 	}
@@ -47,10 +35,10 @@ func (h *SubscriptionHandler) PurchasePremium(c *gin.Context) {
 }
 
 // Get subscription status
-func (h *SubscriptionHandler) GetSubscriptionStatus(c *gin.Context) {
+func (h *Server) GetSubscriptionStatus(c *gin.Context) {
 	userID := c.GetUint("userID")
 
-	subscription, err := h.subscriptionRepo.GetActiveSubscription(userID)
+	subscription, err := h.Repository.GetActiveSubscription(context.Background(), userID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No active subscription found"})
 		return
@@ -60,7 +48,8 @@ func (h *SubscriptionHandler) GetSubscriptionStatus(c *gin.Context) {
 }
 
 // Verify profile (could be an admin endpoint)
-func (h *SubscriptionHandler) VerifyProfile(c *gin.Context) {
+// should be receive callback after payment
+func (h *Server) VerifyProfile(c *gin.Context) {
 	var req struct {
 		UserID uint `json:"user_id" binding:"required"`
 	}
@@ -70,7 +59,20 @@ func (h *SubscriptionHandler) VerifyProfile(c *gin.Context) {
 		return
 	}
 
-	if err := h.profileRepo.VerifyProfile(req.UserID); err != nil {
+	// for simplycity, ill just add the create subscription here
+	subscription := &model.Subscription{
+		UserID:    req.UserID,
+		Status:    model.SubscriptionActive,
+		StartDate: time.Now(),
+		EndDate:   time.Now().AddDate(0, 1, 0),
+	}
+
+	if err := h.Repository.CreateSubscription(context.Background(), subscription); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create subscription"})
+		return
+	}
+
+	if err := h.Repository.VerifyProfile(context.Background(), req.UserID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify profile"})
 		return
 	}

@@ -15,9 +15,11 @@ import (
 
 func main() {
 	db := setupDatabase()
-	userRepo, profileRepo, swipeRepo, subscriptionRepo := initializeRepositories(db)
-	authHandler, profileHandler, subscriptionHandler := initializeHandlers(userRepo, profileRepo, swipeRepo, subscriptionRepo)
-	router := setupRouter(authHandler, profileHandler, subscriptionHandler)
+	repository := repository.NewRepository(db)
+	handler := handler.NewServer(handler.NewServerOptions{
+		Repository: repository,
+	})
+	router := setupRouter(handler)
 
 	router.Run(":8081")
 }
@@ -38,36 +40,23 @@ func setupDatabase() *gorm.DB {
 	return db
 }
 
-func initializeRepositories(db *gorm.DB) (*repository.UserRepository, *repository.ProfileRepository, *repository.SwipeRepository, *repository.SubscriptionRepository) {
-	userRepo := repository.NewUserRepository(db)
-	profileRepo := repository.NewProfileRepository(db)
-	swipeRepo := repository.NewSwipeRepository(db)
-	subscriptionRepo := repository.NewSubscriptionRepository(db)
-	return userRepo, profileRepo, swipeRepo, subscriptionRepo
-}
-
-func initializeHandlers(userRepo *repository.UserRepository, profileRepo *repository.ProfileRepository, swipeRepo *repository.SwipeRepository, subscriptionRepo *repository.SubscriptionRepository) (*handler.AuthHandler, *handler.ProfileHandler, *handler.SubscriptionHandler) {
-	authHandler := handler.NewAuthHandler(userRepo)
-	profileHandler := handler.NewProfileHandler(profileRepo, swipeRepo, subscriptionRepo)
-	subscriptionHandler := handler.NewSubscriptionHandler(subscriptionRepo, profileRepo)
-	return authHandler, profileHandler, subscriptionHandler
-}
-
-func setupRouter(authHandler *handler.AuthHandler, profileHandler *handler.ProfileHandler, subscriptionHandler *handler.SubscriptionHandler) *gin.Engine {
+func setupRouter(handler *handler.Server) *gin.Engine {
 	router := gin.Default()
 
 	// Public routes
-	router.POST("/api/register", authHandler.Register)
-	router.POST("/api/login", authHandler.Login)
+	router.POST("/api/register", handler.Register)
+	router.POST("/api/login", handler.Login)
 
 	// Protected routes
 	protected := router.Group("/api")
 	protected.Use(middleware.AuthMiddleware())
-	protected.GET("/profiles", profileHandler.GetProfilesToSwipe)
+	// it should be create profile page after register, but i will not make it
+	// protected.POST("/profile", profileHandler.CreateProfile)
+	protected.GET("/profiles", handler.GetProfilesToSwipe)
+	protected.POST("/swipe", handler.Swipe)
 
 	// ADMIN should be protected using another auth, but for this i'll not make it
-	router.POST("/admin/generate-profiles", profileHandler.GenerateDummyProfiles)
-	router.POST("/admin/verify-profile", subscriptionHandler.VerifyProfile)
+	router.POST("/admin/verify-profile", handler.VerifyProfile)
 
 	return router
 }

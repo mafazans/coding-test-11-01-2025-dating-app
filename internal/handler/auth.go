@@ -2,7 +2,7 @@ package handler
 
 import (
 	"coding-test-11-01-2025-dating-app/internal/model"
-	"coding-test-11-01-2025-dating-app/internal/repository"
+	"context"
 	"net/http"
 	"os"
 	"time"
@@ -12,20 +12,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-type AuthHandler struct {
-	userRepo *repository.UserRepository
-}
-
-func NewAuthHandler(userRepo *repository.UserRepository) *AuthHandler {
-	return &AuthHandler{userRepo: userRepo}
-}
-
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
 }
 
-func (h *AuthHandler) Register(c *gin.Context) {
+func (h *Server) Register(c *gin.Context) {
+	ctx := context.Background()
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -43,7 +36,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Password: string(hashedPassword),
 	}
 
-	if err := h.userRepo.CreateUser(user); err != nil {
+	if err := h.Repository.CreateUser(ctx, user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
@@ -51,14 +44,15 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "User registered successfully"})
 }
 
-func (h *AuthHandler) Login(c *gin.Context) {
+func (h *Server) Login(c *gin.Context) {
+	ctx := context.Background()
 	var req RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	user, err := h.userRepo.GetUserByUsername(req.Username)
+	user, err := h.Repository.GetUserByUsername(ctx, req.Username)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
@@ -82,14 +76,4 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"token": tokenString})
-}
-
-func (h *AuthHandler) Profile(c *gin.Context) {
-	userID, exists := c.Get("userID")
-	if !exists {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"user_id": userID})
 }

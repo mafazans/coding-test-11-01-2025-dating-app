@@ -2,49 +2,64 @@ package handler
 
 import (
 	"coding-test-11-01-2025-dating-app/internal/model"
-	"coding-test-11-01-2025-dating-app/internal/repository"
-	"fmt"
-	"math/rand"
+	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
 
-type ProfileHandler struct {
-	profileRepo      *repository.ProfileRepository
-	swipeRepo        *repository.SwipeRepository
-	subscriptionRepo *repository.SubscriptionRepository
-}
-
-func NewProfileHandler(pr *repository.ProfileRepository, sr *repository.SwipeRepository, sbr *repository.SubscriptionRepository) *ProfileHandler {
-	return &ProfileHandler{
-		profileRepo:      pr,
-		swipeRepo:        sr,
-		subscriptionRepo: sbr,
-	}
-}
-
 type SwipeRequest struct {
-	ProfileID uint `json:"profile_id" binding:"required"`
-	IsLike    bool `json:"is_like"`
+	UserID uint `json:"user_id" binding:"required"`
+	IsLike bool `json:"is_like"`
 }
 
-func (h *ProfileHandler) GetProfilesToSwipe(c *gin.Context) {
+func (h *Server) GetProfilesToSwipe(c *gin.Context) {
 	userID := c.GetUint("userID")
+	ctx := context.Background()
 
-	// Check daily swipe limit
-	count, err := h.swipeRepo.GetDailySwipeCount(userID)
+	_, err := h.Repository.GetUserByID(ctx, int(userID))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get swipe count"})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
-	if count >= 10 {
-		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Daily swipe limit reached"})
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid limit parameter"})
 		return
 	}
 
-	profiles, err := h.profileRepo.GetUnswiped(userID, 10)
+	if limit <= 0 || limit > 100 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Limit must be between 1 and 100"})
+		return
+	}
+
+	// Check if user is premium
+	isPremium, err := h.Repository.IsUserPremium(ctx, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check premium status"})
+		return
+	}
+
+	// Only check swipe limit for non-premium users
+	if !isPremium {
+
+		// Check daily swipe limit
+		count, err := h.Repository.GetDailySwipeCount(ctx, userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get swipe count"})
+			return
+		}
+
+		if count >= 10 {
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "Daily swipe limit reached"})
+			return
+		}
+
+	}
+
+	profiles, err := h.Repository.GetUnswiped(ctx, userID, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch profiles"})
 		return
@@ -53,8 +68,16 @@ func (h *ProfileHandler) GetProfilesToSwipe(c *gin.Context) {
 	c.JSON(http.StatusOK, profiles)
 }
 
-func (h *ProfileHandler) Swipe(c *gin.Context) {
+func (h *Server) Swipe(c *gin.Context) {
 	userID := c.GetUint("userID")
+
+	ctx := context.Background()
+
+	_, err := h.Repository.GetUserByID(ctx, int(userID))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
+	}
 
 	var req SwipeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -63,7 +86,7 @@ func (h *ProfileHandler) Swipe(c *gin.Context) {
 	}
 
 	// Check if user is premium
-	isPremium, err := h.subscriptionRepo.IsUserPremium(userID)
+	isPremium, err := h.Repository.IsUserPremium(ctx, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check premium status"})
 		return
@@ -71,7 +94,7 @@ func (h *ProfileHandler) Swipe(c *gin.Context) {
 
 	// Only check swipe limit for non-premium users
 	if !isPremium {
-		count, err := h.swipeRepo.GetDailySwipeCount(userID)
+		count, err := h.Repository.GetDailySwipeCount(ctx, userID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get swipe count"})
 			return
@@ -89,18 +112,24 @@ func (h *ProfileHandler) Swipe(c *gin.Context) {
 	// Record the swipe
 	swipe := &model.Swipe{
 		SwiperID: userID,
-		SwipedID: req.ProfileID,
+		SwipedID: req.UserID,
 		IsLike:   req.IsLike,
 	}
 
-	if err := h.swipeRepo.CreateSwipe(swipe); err != nil {
+	_, err = h.Repository.GetUserByID(ctx, int(req.UserID))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	if err := h.Repository.CreateSwipe(ctx, swipe); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record swipe"})
 		return
 	}
 
 	// Check for match if it's a like
 	if req.IsLike {
-		isMatch, err := h.swipeRepo.CheckMatch(userID, req.ProfileID)
+		isMatch, err := h.Repository.CheckMatch(ctx, userID, req.UserID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check match"})
 			return
@@ -119,40 +148,4 @@ func (h *ProfileHandler) Swipe(c *gin.Context) {
 		"message":  "Swipe recorded successfully",
 		"is_match": false,
 	})
-}
-
-// GenerateDummyProfiles creates dummy profiles for testing
-func (h *ProfileHandler) GenerateDummyProfiles(c *gin.Context) {
-	names := []string{"Alice", "Bob", "Charlie", "Diana", "Edward", "Fiona", "George", "Hannah", "Ian", "Julia"}
-	genders := []string{"male", "female"}
-
-	for i := 0; i < 500; i++ {
-		profile := &model.Profile{
-			Name:     names[rand.Intn(len(names))] + "-" + randomString(5),
-			Bio:      "I love " + randomHobby(),
-			Age:      18 + rand.Intn(42), // Ages 18-60
-			Gender:   genders[rand.Intn(len(genders))],
-			PhotoURL: fmt.Sprintf("https://placeholder.com/user%d.jpg", i),
-		}
-
-		if err := h.profileRepo.CreateProfile(profile); err != nil {
-			continue
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "Dummy profiles generated"})
-}
-
-func randomString(n int) string {
-	letters := []rune("abcdefghijklmnopqrstuvwxyz0123456789")
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
-	}
-	return string(b)
-}
-
-func randomHobby() string {
-	hobbies := []string{"hiking", "reading", "photography", "cooking", "traveling", "music", "art", "sports", "gaming", "dancing"}
-	return hobbies[rand.Intn(len(hobbies))]
 }
